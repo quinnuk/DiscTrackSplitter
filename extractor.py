@@ -1385,6 +1385,29 @@ class MusicBrainzCandidate:
     score: int = 0          # MusicBrainz's own relevance score (0-100) for this search, not our playlist score
 
 
+def _parse_musicbrainz_release_candidates(data: dict) -> list[MusicBrainzCandidate]:
+    """Shared parsing for any MusicBrainz /release search response, regardless of query type."""
+    candidates: list[MusicBrainzCandidate] = []
+    for r in data.get("releases", []):
+        artist_credit = r.get("artist-credit") or []
+        artist_name = artist_credit[0].get("name", "") if artist_credit else ""
+        media = r.get("media") or []
+        track_count = sum(m.get("track-count", 0) for m in media)
+        format_hint = media[0].get("format") or "" if media else ""
+        candidates.append(
+            MusicBrainzCandidate(
+                release_id=r.get("id", ""),
+                title=r.get("title", ""),
+                artist=artist_name,
+                date=r.get("date", ""),
+                track_count=track_count,
+                format_hint=format_hint,
+                score=r.get("score", 0),
+            )
+        )
+    return candidates
+
+
 def search_musicbrainz_releases(
     artist: str,
     album_title: str,
@@ -1408,26 +1431,28 @@ def search_musicbrainz_releases(
     query = " AND ".join(query_parts)
 
     data = _musicbrainz_request("release", {"query": query, "limit": str(limit)})
+    return _parse_musicbrainz_release_candidates(data)
 
-    candidates: list[MusicBrainzCandidate] = []
-    for r in data.get("releases", []):
-        artist_credit = r.get("artist-credit") or []
-        artist_name = artist_credit[0].get("name", "") if artist_credit else ""
-        media = r.get("media") or []
-        track_count = sum(m.get("track-count", 0) for m in media)
-        format_hint = media[0].get("format") or "" if media else ""
-        candidates.append(
-            MusicBrainzCandidate(
-                release_id=r.get("id", ""),
-                title=r.get("title", ""),
-                artist=artist_name,
-                date=r.get("date", ""),
-                track_count=track_count,
-                format_hint=format_hint,
-                score=r.get("score", 0),
-            )
-        )
-    return candidates
+
+def search_musicbrainz_releases_by_barcode(barcode: str, limit: int = 8) -> list[MusicBrainzCandidate]:
+    """
+    Search MusicBrainz for release candidates matching a UPC/EAN barcode
+    (the number printed under the barcode lines on the disc case/sleeve).
+    Unlike an artist/album text search, a barcode identifies one specific
+    physical or digital edition - which matters for concert Blu-rays,
+    since different regional pressings/reissues of the same show often
+    carry different bonus tracks or a different tracklist entirely.
+
+    Whitespace and dashes are stripped, since barcodes are sometimes
+    copied with them; everything else is sent to MusicBrainz as-is, so
+    a mistyped digit just returns no results rather than a wrong match.
+    """
+    digits = re.sub(r"[^0-9]", "", barcode)
+    if not digits:
+        raise ValueError("Enter a barcode (the number under the barcode lines) to search.")
+
+    data = _musicbrainz_request("release", {"query": f"barcode:{digits}", "limit": str(limit)})
+    return _parse_musicbrainz_release_candidates(data)
 
 
 def fetch_musicbrainz_tracklist(release_id: str) -> list[TracklistEntry]:

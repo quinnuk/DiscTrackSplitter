@@ -178,13 +178,17 @@ NAMING CHAPTERS - FOUR WAYS
   files sitting in the disc folder (BDInfo.txt, Track Listing.txt,
   bdmt_*.xml etc), it'll mention them - these usually came bundled
   with the rip and are normally exactly the right tracklist.
-- Search Online...: looks up the album on MusicBrainz. Good for
-  well-known standard releases. LIMITED/BOUTIQUE EDITIONS (small-run
-  audiophile Blu-ray Pure Audio / Surround Series discs, mail-order
-  exclusives, etc) are very often missing from MusicBrainz, or only
-  the parent CD/digital release is indexed - if the track count shown
-  looks nothing like your chapter count, that's the usual reason.
-  Import Tracklist is more reliable for that kind of disc.
+- Search Online...: looks up the album on MusicBrainz, by artist/album
+  text or by the disc's barcode (the UPC/EAN under the barcode lines on
+  the case). The barcode identifies the exact edition, so it's worth
+  using instead of artist/album when a release has multiple regional
+  pressings or reissues with different bonus tracks. Good for
+  well-known standard releases either way. LIMITED/BOUTIQUE EDITIONS
+  (small-run audiophile Blu-ray Pure Audio / Surround Series discs,
+  mail-order exclusives, etc) are very often missing from MusicBrainz
+  entirely, or only the parent CD/digital release is indexed - if the
+  track count shown looks nothing like your chapter count, that's the
+  usual reason. Import Tracklist is more reliable for that kind of disc.
 
 Whichever method you use, nothing is applied until you review and
 accept the proposed matches - matched chapters are pre-checked,
@@ -1138,17 +1142,30 @@ class DiscTrackSplitterApp(ctk.CTk):
         search_input = self._show_musicbrainz_search_dialog(artist_guess, album_guess, year_guess)
         if search_input is None:
             return
-        artist, album, year = search_input
 
-        self.set_status(f"Searching MusicBrainz for {artist} - {album}...")
+        if search_input["mode"] == "barcode":
+            barcode = search_input["barcode"]
+            self.set_status(f"Searching MusicBrainz for barcode {barcode}...")
 
-        def work() -> None:
-            try:
-                candidates = extractor.search_musicbrainz_releases(artist, album, year)
-            except Exception as exc:  # noqa: BLE001
-                self.after(0, lambda: self._on_musicbrainz_error(exc))
-                return
-            self.after(0, lambda: self._on_musicbrainz_search_complete(candidates))
+            def work() -> None:
+                try:
+                    candidates = extractor.search_musicbrainz_releases_by_barcode(barcode)
+                except Exception as exc:  # noqa: BLE001
+                    self.after(0, lambda: self._on_musicbrainz_error(exc))
+                    return
+                self.after(0, lambda: self._on_musicbrainz_search_complete(candidates))
+
+        else:
+            artist, album, year = search_input["artist"], search_input["album"], search_input["year"]
+            self.set_status(f"Searching MusicBrainz for {artist} - {album}...")
+
+            def work() -> None:
+                try:
+                    candidates = extractor.search_musicbrainz_releases(artist, album, year)
+                except Exception as exc:  # noqa: BLE001
+                    self.after(0, lambda: self._on_musicbrainz_error(exc))
+                    return
+                self.after(0, lambda: self._on_musicbrainz_search_complete(candidates))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -1234,12 +1251,12 @@ class DiscTrackSplitterApp(ctk.CTk):
 
     def _show_musicbrainz_search_dialog(
         self, artist_guess: str, album_guess: str, year_guess: int | None
-    ) -> tuple[str, str, int | None] | None:
-        outcome: dict[str, tuple[str, str, int | None] | None] = {"result": None}
+    ) -> dict | None:
+        outcome: dict[str, dict | None] = {"result": None}
 
         dialog = ctk.CTkToplevel(self)
         dialog.title("Search MusicBrainz")
-        dialog.geometry("420x240")
+        dialog.geometry("440x400")
         dialog.transient(self)
         dialog.grab_set()
 
@@ -1261,25 +1278,57 @@ class DiscTrackSplitterApp(ctk.CTk):
         year_entry.grid(row=2, column=1, sticky="w", padx=(0, 16), pady=4)
         enable_clipboard(year_entry)
 
+        separator = ctk.CTkFrame(dialog, height=2, fg_color="gray30")
+        separator.grid(row=3, column=0, columnspan=2, sticky="ew", padx=16, pady=(16, 4))
+
+        ctk.CTkLabel(dialog, text="— OR —", text_color="gray60").grid(
+            row=4, column=0, columnspan=2, pady=(0, 4)
+        )
+
+        ctk.CTkLabel(dialog, text="Barcode:").grid(row=5, column=0, sticky="w", padx=16, pady=4)
+        barcode_var = ctk.StringVar(value="")
+        barcode_entry = ctk.CTkEntry(dialog, textvariable=barcode_var, width=260, placeholder_text="e.g. 5051890...")
+        barcode_entry.grid(row=5, column=1, padx=(0, 16), pady=4)
+        enable_clipboard(barcode_entry)
+
+        ctk.CTkLabel(
+            dialog,
+            text=(
+                "The UPC/EAN number under the barcode lines on the disc case. "
+                "Identifies the exact edition, so it's more precise than "
+                "artist/album for reissues with different bonus tracks. "
+                "If filled in, it's used instead of artist/album."
+            ),
+            text_color="gray60", wraplength=400, justify="left",
+        ).grid(row=6, column=0, columnspan=2, sticky="w", padx=16, pady=(0, 4))
+
         ctk.CTkLabel(
             dialog, text="Searches musicbrainz.org - nothing is applied until you review results.",
-            text_color="gray60", wraplength=380, justify="left",
-        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=16, pady=(4, 0))
+            text_color="gray60", wraplength=400, justify="left",
+        ).grid(row=7, column=0, columnspan=2, sticky="w", padx=16, pady=(8, 0))
 
         button_row = ctk.CTkFrame(dialog, fg_color="transparent")
-        button_row.grid(row=4, column=0, columnspan=2, pady=16)
+        button_row.grid(row=8, column=0, columnspan=2, pady=16)
 
         def do_search() -> None:
+            barcode = barcode_var.get().strip()
+            if barcode:
+                outcome["result"] = {"mode": "barcode", "barcode": barcode}
+                dialog.destroy()
+                return
+
             artist = artist_var.get().strip()
             album = album_var.get().strip()
             if not artist or not album:
                 messagebox.showwarning(
-                    "Missing info", "Both artist and album are needed to search.", parent=dialog
+                    "Missing info",
+                    "Enter both artist and album, or a barcode, to search.",
+                    parent=dialog,
                 )
                 return
             year_text = year_var.get().strip()
             year = int(year_text) if year_text.isdigit() else None
-            outcome["result"] = (artist, album, year)
+            outcome["result"] = {"mode": "artist_album", "artist": artist, "album": album, "year": year}
             dialog.destroy()
 
         def cancel() -> None:
