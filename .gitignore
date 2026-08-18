@@ -1,0 +1,19 @@
+# Build artifacts
+build/
+dist/
+*.spec.bak
+__pycache__/
+*.pyc
+
+# Local settings (contains machine-specific tool paths/folders)
+*.egg-info/
+.venv/
+venv/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+node-v26.7.0-x64.msi
+
+node-v26.7.0-x64.msi
