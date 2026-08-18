@@ -1,4 +1,6 @@
-# 🎧 Disc Track Splitter
+
+
+![Disc Track Splitter Interface](screenshot.png)
 
 Split ripped Blu-ray concert and music discs into individual, chapter-named song files using your choice of audio track — completely lossless and without re-encoding.
 
