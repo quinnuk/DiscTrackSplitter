@@ -12,7 +12,7 @@ Split ripped Blu-ray concert and music discs into individual, chapter-named song
 ---
 
 <!-- Replace this image path once you add a screenshot to your repository -->
-![Disc Track Splitter Interface](screenshot.png)
+![Disc Track Splitter Interface](screenshot.png))
 
 ---
 
