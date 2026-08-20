@@ -1,9 +1,10 @@
 """
 extractor.py
 
-Core logic for scanning Blu-ray disc folders, finding Dolby Atmos audio
-tracks, reading chapter markers, and splitting the Atmos stream into
-individual named song files.
+Core logic for scanning Blu-ray disc folders, finding the best available
+audio track (Dolby Atmos when present, otherwise the best lossless
+alternative), reading chapter markers, and splitting that audio stream
+into individual named song files.
 
 Requires on PATH (or configured via settings.py):
     - mkvmerge / mkvextract  (MKVToolNix)
@@ -645,9 +646,11 @@ def score_playlists(
     expected_duration_seconds: Optional[float] = None,
 ) -> list[PlaylistScore]:
     """
-    Score every scanned playlist as a candidate for "the" Atmos concert
+    Score every scanned playlist as a candidate for "the" concert
     feature, replacing the old heuristic of silently picking whichever
-    Atmos playlist happened to have the most chapters. Returns
+    Atmos playlist happened to have the most chapters. Atmos is treated
+    as a bonus signal, not a requirement, so non-Atmos discs are scored
+    fairly too. Returns
     PlaylistScore objects sorted highest-score first, each carrying the
     reasons behind its score so the UI can show its work and the user can
     confirm (or override) the pick, instead of a single silent choice.
@@ -669,7 +672,21 @@ def score_playlists(
             atmos = pl.atmos_track
             reasons.append(f"Has a Dolby Atmos/TrueHD track (ID {atmos.track_id})")
         else:
-            reasons.append("No Atmos/TrueHD track - very unlikely to be the right playlist")
+            best = pl.best_default_audio_track()
+            if best is not None:
+                codec_lower = best.codec.lower()
+                is_lossless = any(
+                    h in codec_lower
+                    for h in ("truehd", "dts-hd master", "flac", "pcm", "lpcm", "alac")
+                )
+                if is_lossless:
+                    score += 70
+                    reasons.append(f"No Atmos, but best available track is lossless ({best.codec})")
+                else:
+                    score += 30
+                    reasons.append(f"No Atmos or lossless track - best available is {best.codec}")
+            else:
+                reasons.append("No audio track at all - cannot be the right playlist")
 
         if pl.chapter_count > 0:
             score += min(pl.chapter_count * 2, 40)
@@ -748,17 +765,6 @@ def _flag_duplicate_angles(scored: list[PlaylistScore]) -> None:
                 f"Same duration/chapters/tracks as {primary.playlist.path.name} "
                 f"- likely a duplicate or alternate angle"
             )
-
-
-def find_best_atmos_playlist(playlists: list[Playlist]) -> Optional[Playlist]:
-    """
-    Deprecated - kept only for backwards compatibility with any external
-    scripts built against the old API. Prefer score_playlists(), which
-    exposes the reasoning behind the pick and every other candidate
-    instead of returning a single silent choice.
-    """
-    scored = [s for s in score_playlists(playlists) if s.playlist.has_atmos]
-    return scored[0].playlist if scored else None
 
 
 # ---------------------------------------------------------------------------
@@ -1460,8 +1466,8 @@ def fetch_musicbrainz_tracklist(release_id: str) -> list[TracklistEntry]:
     Fetch the full tracklist (with per-track lengths, where MusicBrainz
     has them) for a specific release, as TracklistEntry objects ready for
     match_tracklist_to_chapters(). Only the first medium (disc) is used -
-    MusicBrainz supports multi-disc releases, but one Atmos Blu-ray
-    playlist corresponds to a single continuous chapter set.
+    MusicBrainz supports multi-disc releases, but one Blu-ray playlist
+    corresponds to a single continuous chapter set.
 
     start_seconds is only filled in for a run of tracks whose lengths are
     all known from the start - a length-less track partway through the
